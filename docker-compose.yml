@@ -1,0 +1,80 @@
+services:
+
+  prediction-service:
+    image: prediction-service:latest
+    build:
+      context: .
+      dockerfile: prediction_service/Dockerfile
+    container_name: prediction_service
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./models:/app/models
+      - ./ml_pipeline:/app/ml_pipeline
+    environment:
+      - PROJECT_ROOT=/app
+      - PYTHONPATH=/app/ml_pipeline
+      - MONGO_URI=mongodb://admin:admin@mongodb:27017/logs_db?authSource=admin
+    depends_on:
+      - mongodb
+    networks:
+      - netsentinel
+
+  drift-service:
+    image: drift-service:latest
+    build:
+      context: ./drift_service
+      dockerfile: Dockerfile
+    container_name: drift_service
+    ports:
+      - "8001:8001"
+    # Override the hardcoded localhost URL so it can reach prediction-service by name
+    environment:
+      - PREDICTION_SERVICE_URL=http://prediction-service:8000
+      - PROJECT_ROOT=/app
+      - MONGO_URI=mongodb://admin:admin@mongodb:27017/logs_db?authSource=admin
+    volumes:
+      - ./models:/app/models
+      - ./ml_pipeline:/app/ml_pipeline
+    depends_on:
+      - prediction-service
+      - mongodb
+    networks:
+      - netsentinel
+
+  frontend:
+    image: frontend:latest
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: frontend
+    ports:
+      - "8501:8501"
+    # Override the hardcoded localhost URL so it can reach prediction-service by name
+    environment:
+      - API_URL=http://prediction-service:8000
+    depends_on:
+      - prediction-service
+      - drift-service
+    networks:
+      - netsentinel
+
+  mongodb:
+    image: mongodb_service:latest
+    build:
+      context: ./data_storage
+      dockerfile: Dockerfile
+    container_name: mongodb_service
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    networks:
+      - netsentinel
+
+networks:
+  netsentinel:
+    driver: bridge
+
+volumes:
+  mongodb_data:
