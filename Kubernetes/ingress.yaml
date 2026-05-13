@@ -1,0 +1,27 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: netsentinel-ingress
+  namespace: log-anomaly
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+    nginx.ingress.kubernetes.io/client-body-buffer-size: "50m"
+spec:
+  rules:
+  - host: netsentinel.local
+    http:
+      paths:
+      - path: /drift
+        pathType: Prefix
+        backend:
+          service:
+            name: drift-service
+            port:
+              number: 8001
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: frontend-service
+            port:
+              number: 8501

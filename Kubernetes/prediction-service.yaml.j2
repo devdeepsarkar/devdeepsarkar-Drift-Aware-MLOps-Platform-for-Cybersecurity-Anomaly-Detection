@@ -1,0 +1,112 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prediction-deployment
+  namespace: log-anomaly
+
+spec:
+  replicas: 1
+
+  selector:
+    matchLabels:
+      app: prediction-service
+
+  template:
+    metadata:
+      labels:
+        app: prediction-service
+
+    spec:
+
+      initContainers:
+      - name: seed-models
+        image: preet1018/prediction-service:{{ prediction_tag | default('latest') }}
+        imagePullPolicy: Always
+        command: ['sh', '-c', 'cp -n /app/models/* /target-models/ || true']
+        volumeMounts:
+          - name: models-storage
+            mountPath: /target-models
+          - name: data-storage
+            mountPath: /app/data_storage
+
+      containers:
+      - name: prediction-service
+
+        image: preet1018/prediction-service:{{ prediction_tag | default('latest') }}
+
+        imagePullPolicy: Always
+
+        ports:
+        - containerPort: 8000
+
+        env:
+        - name: PROJECT_ROOT
+          value: "/app"
+        - name: MONGO_USER
+          valueFrom:
+            secretKeyRef:
+              name: mongodb-secret
+              key: mongo-root-username
+        - name: MONGO_PASS
+          valueFrom:
+            secretKeyRef:
+              name: mongodb-secret
+              key: mongo-root-password
+        - name: MONGO_DB
+          valueFrom:
+            secretKeyRef:
+              name: mongodb-secret
+              key: mongo-initdb-database
+        - name: MONGO_URI
+          value: "mongodb://$(MONGO_USER):$(MONGO_PASS)@mongodb:27017/$(MONGO_DB)?authSource=admin"
+
+        volumeMounts:
+          - name: models-storage
+            mountPath: /app/models
+          - name: data-storage
+            mountPath: /app/data_storage
+
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 5
+
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+
+          initialDelaySeconds: 20
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+
+      volumes:
+      - name: models-storage
+        persistentVolumeClaim:
+          claimName: models-pvc
+      - name: data-storage
+        persistentVolumeClaim:
+          claimName: data-pvc
+
+---
+apiVersion: v1
+kind: Service
+
+metadata:
+  name: prediction-service
+  namespace: log-anomaly
+
+spec:
+  selector:
+    app: prediction-service
+
+  ports:
+    - protocol: TCP
+      port: 8000
+      targetPort: 8000
