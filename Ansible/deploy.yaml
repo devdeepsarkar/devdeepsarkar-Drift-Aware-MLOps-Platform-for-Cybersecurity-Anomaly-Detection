@@ -1,0 +1,71 @@
+---
+- hosts: master
+  become: no
+
+  vars:
+    prediction_tag: "latest"
+    drift_tag: "latest"
+    frontend_tag: "latest"
+
+  tasks:
+    # 1. Ensure the output directory for templated manifests exists
+    - name: "Ensure manifest output directory exists"
+      file:
+        path: /var/lib/jenkins/k8s-manifests
+        state: directory
+        mode: '0755'
+
+    # 2. Apply base infrastructure that doesn't need templating
+    - name: "Ensure Namespace, Volumes, Secrets, MongoDB, and Ingress exist"
+      command: kubectl apply -f ../Kubernetes/{{ item }} --validate=false
+      loop:
+        - namespace.yaml
+        - volumes.yaml
+        - mongodb-secret.yaml
+        - mongodb.yaml
+        - ingress.yaml
+
+    - name: "Apply monitoring stack resources"
+      command: kubectl apply -f ../Kubernetes/logging/ --validate=false
+
+    # 3. Template the dynamic K8s manifests using the tags provided by Jenkins
+    - name: "Update Kubernetes manifests with latest Prediction tag"
+      template:
+        src: "../Kubernetes/prediction-service.yaml.j2"
+        dest: "/var/lib/jenkins/k8s-manifests/prediction-service.yaml"
+
+    - name: "Update Kubernetes manifests with latest Drift tag"
+      template:
+        src: "../Kubernetes/drift-service.yaml.j2"
+        dest: "/var/lib/jenkins/k8s-manifests/drift-service.yaml"
+
+    - name: "Update Kubernetes manifests with latest Frontend tag"
+      template:
+        src: "../Kubernetes/frontend.yaml.j2"
+        dest: "/var/lib/jenkins/k8s-manifests/frontend-deployment.yaml"
+
+    # 4. Apply the templated manifests
+    - name: "Apply Prediction Deployment"
+      command: kubectl apply -f /var/lib/jenkins/k8s-manifests/prediction-service.yaml --validate=false
+
+    - name: "Apply Drift Deployment"
+      command: kubectl apply -f /var/lib/jenkins/k8s-manifests/drift-service.yaml --validate=false
+
+    - name: "Apply Frontend Deployment"
+      command: kubectl apply -f /var/lib/jenkins/k8s-manifests/frontend-deployment.yaml --validate=false
+
+    # 5. Verify the zero-downtime rolling update succeeds
+    - name: "Verify Rollout Status (Prediction Service)"
+      command: kubectl rollout status deployment/prediction-deployment -n log-anomaly --timeout=180s
+
+    - name: "Verify Rollout Status (Drift Service)"
+      command: kubectl rollout status deployment/drift-deployment -n log-anomaly --timeout=180s
+
+    - name: "Verify Rollout Status (Frontend)"
+      command: kubectl rollout status deployment/frontend-deployment -n log-anomaly --timeout=180s
+
+    - name: "Deployment Completed"
+      debug:
+        msg: "Kubernetes deployment updated successfully for all services!"
+
+# ansible-playbook -i Ansible/inventory.ini Ansible/deploy.yaml -e frontend_tag=latest -e prediction_tag=latest -e drift_tag=latest
